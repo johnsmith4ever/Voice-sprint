@@ -166,6 +166,9 @@ export default function VoiceSprint() {
   }>({ status: 'idle' })
   const langDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showMismatchModal, setShowMismatchModal] = useState(false)
+  const [showMicModal, setShowMicModal] = useState(false)
+  const [micModalError, setMicModalError] = useState<string | null>(null)
+  const pendingSprintFnRef = useRef<(() => void) | null>(null)
 
   // ── State: answer language check
   const [answerLangCheck, setAnswerLangCheck] = useState<{
@@ -510,6 +513,13 @@ export default function VoiceSprint() {
     setRevealCount(0)
     resultsRef.current = []
     indexRef.current   = 0
+  }
+
+  // Opens the mic permission modal, then calls fn() once access is confirmed
+  const requestMic = (fn: () => void) => {
+    pendingSprintFnRef.current = fn
+    setMicModalError(null)
+    setShowMicModal(true)
   }
 
   useEffect(() => () => stopAll(), [stopAll])
@@ -1074,7 +1084,7 @@ export default function VoiceSprint() {
                   if (langCheck.status === 'warn') {
                     setShowMismatchModal(true)
                   } else {
-                    startSprint()
+                    requestMic(startSprint)
                   }
                 }}
                 className="btn-hover"
@@ -1452,22 +1462,23 @@ export default function VoiceSprint() {
                 {/* Reattempt — same questions */}
                 <button
                   onClick={() => {
-                    stopAll()
-                    const vqs = validQsRef.current  // already set from the sprint
-                    indexRef.current      = 0
-                    resultsRef.current    = []
-                    transcriptRef.current = ''
-                    isSubmittingRef.current = false
-                    setResults([])
-                    setRevealCount(0)
-                    setCurrentIndex(0)
-                    setTranscript('')
-                    setTimeLeft(QUESTION_TIME)
-                    setIsTranscribing(false)
-                    setSprintError(null)
-                    setQEntering(false)
-                    setScreen('sprint')
-                    setTimeout(() => { setQEntering(true); startForIndex(0) }, 280)
+                    requestMic(() => {
+                      stopAll()
+                      indexRef.current      = 0
+                      resultsRef.current    = []
+                      transcriptRef.current = ''
+                      isSubmittingRef.current = false
+                      setResults([])
+                      setRevealCount(0)
+                      setCurrentIndex(0)
+                      setTranscript('')
+                      setTimeLeft(QUESTION_TIME)
+                      setIsTranscribing(false)
+                      setSprintError(null)
+                      setQEntering(false)
+                      setScreen('sprint')
+                      setTimeout(() => { setQEntering(true); startForIndex(0) }, 280)
+                    })
                   }}
                   className="btn-hover"
                   style={{
@@ -1593,7 +1604,7 @@ export default function VoiceSprint() {
                 Go back
               </button>
               <button
-                onClick={() => { setShowMismatchModal(false); startSprint() }}
+                onClick={() => { setShowMismatchModal(false); requestMic(startSprint) }}
                 className="btn-hover"
                 style={{
                   flex: 1, padding: '13px',
@@ -1612,7 +1623,128 @@ export default function VoiceSprint() {
         </div>
       )}
 
-      </div>
+      {/* ── Mic Permission Modal ─────────────────────────────────────── */}
+      {showMicModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 110,
+            background: 'rgba(8,11,26,0.9)',
+            backdropFilter: 'blur(12px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24,
+            animation: 'floatIn 0.2s ease forwards',
+          }}
+        >
+          <div style={{
+            width: '100%', maxWidth: 420,
+            background: '#0F1228',
+            border: '1px solid rgba(139,146,185,0.15)',
+            borderRadius: 28, overflow: 'hidden',
+            animation: 'scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) forwards',
+          }}>
+            {/* Icon header */}
+            <div style={{
+              padding: '32px 28px 24px',
+              borderBottom: '1px solid rgba(139,146,185,0.08)',
+              textAlign: 'center',
+            }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: 20, margin: '0 auto 18px',
+                background: 'linear-gradient(135deg, rgba(198,255,77,0.15), rgba(140,123,255,0.15))',
+                border: '1px solid rgba(198,255,77,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28,
+              }}>🎙️</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#F0F4FF', marginBottom: 8 }}>
+                Microphone access
+              </div>
+              <div style={{ fontSize: 13, color: '#8B92B9', lineHeight: 1.6 }}>
+                Voice Sprint needs your microphone to record your spoken answers during each question.
+              </div>
+            </div>
+
+            {/* Privacy points */}
+            <div style={{ padding: '20px 28px' }}>
+              {[
+                { icon: '🔒', text: 'Your audio is never stored on any server' },
+                { icon: '👁️', text: 'Only you can see your transcripts and results' },
+                { icon: '⏱️', text: 'The mic is active only while a question is recording' },
+                { icon: '🙈', text: 'Nothing is sent anywhere except for live transcription' },
+              ].map(pt => (
+                <div key={pt.icon} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 14 }}>
+                  <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{pt.icon}</span>
+                  <span style={{ fontSize: 13, color: '#8B92B9', lineHeight: 1.5 }}>{pt.text}</span>
+                </div>
+              ))}
+
+              {/* Inline error */}
+              {micModalError && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 12,
+                  background: 'rgba(255,77,109,0.08)',
+                  border: '1px solid rgba(255,77,109,0.25)',
+                  color: '#FF4D6D', fontSize: 13, lineHeight: 1.5,
+                  marginBottom: 16, marginTop: 4,
+                }}>
+                  {micModalError}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{ padding: '0 28px 28px', display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => { setShowMicModal(false); setMicModalError(null) }}
+                className="btn-hover"
+                style={{
+                  flex: 1, padding: '13px', borderRadius: 14,
+                  background: 'rgba(139,146,185,0.08)',
+                  border: '1px solid rgba(139,146,185,0.15)',
+                  color: '#8B92B9', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                  fontFamily: "'Space Grotesk', sans-serif",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setMicModalError(null)
+                  try {
+                    // Pre-request permission — browser shows the native popup here
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                    // Release immediately — startForIndex will open its own stream
+                    stream.getTracks().forEach(t => t.stop())
+                    setShowMicModal(false)
+                    pendingSprintFnRef.current?.()
+                    pendingSprintFnRef.current = null
+                  } catch (err) {
+                    const name = (err as DOMException)?.name ?? ''
+                    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+                      setMicModalError('No microphone found. Please connect a mic and try again.')
+                    } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+                      setMicModalError('Permission denied. Allow microphone access in your browser settings.')
+                    } else {
+                      setMicModalError(`Could not access microphone: ${(err as Error)?.message ?? err}`)
+                    }
+                  }
+                }}
+                className="btn-hover"
+                style={{
+                  flex: 2, padding: '13px', borderRadius: 14,
+                  background: 'linear-gradient(135deg, #C6FF4D 0%, #9DDB1A 100%)',
+                  border: 'none',
+                  color: '#080B1A', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                <span>🎙️</span> Allow &amp; Start
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
