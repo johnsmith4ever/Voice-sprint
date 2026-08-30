@@ -1738,7 +1738,7 @@ export default function VoiceSprint() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 }}
               >
-                <span>🎙️</span> Allow &amp; Start
+                <span>🎙️</span> Allow & Start
               </button>
             </div>
           </div>
