@@ -1745,6 +1745,7 @@ export default function VoiceSprint() {
         </div>
       )}
 
+      </div>
     </div>
   )
 }
