@@ -205,6 +205,7 @@ export default function VoiceSprint() {
     note?: string
   }>({ status: 'idle' })
   const langDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [showMismatchModal, setShowMismatchModal] = useState(false)
   const [showMicModal, setShowMicModal] = useState(false)
   const [showSilentModal, setShowSilentModal] = useState(false)
   const [micModalError, setMicModalError] = useState<string | null>(null)
