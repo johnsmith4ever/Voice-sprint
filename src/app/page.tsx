@@ -205,8 +205,8 @@ export default function VoiceSprint() {
     note?: string
   }>({ status: 'idle' })
   const langDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [showMismatchModal, setShowMismatchModal] = useState(false)
   const [showMicModal, setShowMicModal] = useState(false)
+  const [showSilentModal, setShowSilentModal] = useState(false)
   const [micModalError, setMicModalError] = useState<string | null>(null)
   const pendingSprintFnRef = useRef<(() => void) | null>(null)
 
@@ -228,23 +228,33 @@ export default function VoiceSprint() {
   const [qEntering, setQEntering]       = useState(false)
   const [isAnswerRevealed, setIsAnswerRevealed] = useState(false)
 
-  const playQuestionAudio = useCallback((text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return
-    window.speechSynthesis.cancel() // Stop any ongoing speech
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = language
-    const rateMap = { slow: 0.75, normal: 1.0, fast: 1.25 }
-    utterance.rate = rateMap[ttsSpeed] || 1.0
+  const audioInstanceRef = useRef<HTMLAudioElement | null>(null)
 
-    // Explicitly set voice to prevent silent failures on some browsers
-    const voices = window.speechSynthesis.getVoices()
-    if (voices.length > 0) {
-      const voice = voices.find(v => v.lang === language) 
-                 || voices.find(v => v.lang.startsWith(language.split('-')[0]))
-      if (voice) utterance.voice = voice
+  const playQuestionAudio = useCallback(async (text: string) => {
+    try {
+      if (audioInstanceRef.current) {
+        audioInstanceRef.current.pause()
+        audioInstanceRef.current.currentTime = 0
+      }
+
+      const res = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language })
+      })
+      if (!res.ok) return
+      
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      const rateMap = { slow: 0.75, normal: 1.0, fast: 1.25 }
+      audio.playbackRate = rateMap[ttsSpeed] || 1.0
+      
+      audioInstanceRef.current = audio
+      audio.play().catch(e => console.error('Audio play error:', e))
+    } catch (e) {
+      console.error('TTS failed:', e)
     }
-
-    window.speechSynthesis.speak(utterance)
   }, [language, ttsSpeed])
 
   // ── State: results
@@ -405,7 +415,10 @@ export default function VoiceSprint() {
     }
     mediaRecorderRef.current = null
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
-    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel()
+    if (audioInstanceRef.current) {
+      audioInstanceRef.current.pause()
+      audioInstanceRef.current.currentTime = 0
+    }
     audioChunksRef.current = []
     setIsRecording(false)
     setIsTranscribing(false)
@@ -583,9 +596,14 @@ export default function VoiceSprint() {
     indexRef.current   = 0
   }
 
-  // Opens the mic permission modal, then calls fn() once access is confirmed
-  const requestMic = (fn: () => void) => {
+  // Opens the silent mode warning modal, then the mic permission modal
+  const requestPreSprintChecks = (fn: () => void) => {
     pendingSprintFnRef.current = fn
+    setShowSilentModal(true)
+  }
+
+  const continueFromSilentToMic = () => {
+    setShowSilentModal(false)
     setMicModalError(null)
     setShowMicModal(true)
   }
@@ -844,29 +862,56 @@ export default function VoiceSprint() {
                 </div>
               )}
 
-              {/* Language row */}
-              <div style={{ marginBottom: 20, animation: 'floatIn 0.6s 0.15s ease both' }}>
-                <div style={{ fontSize: 12, color: '#4A5280', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
-                  Answer language
+              <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 20 }}>
+                {/* Language row */}
+                <div style={{ animation: 'floatIn 0.6s 0.15s ease both' }}>
+                  <div style={{ fontSize: 12, color: '#4A5280', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
+                    Answer language
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {LANGUAGES.map(lang => (
+                      <button
+                        key={lang.code}
+                        onClick={() => setLanguage(lang.code)}
+                        className="btn-hover"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '8px 16px', borderRadius: 50,
+                          background: language === lang.code ? 'rgba(198,255,77,0.15)' : 'rgba(30,35,71,0.5)',
+                          border: `1px solid ${language === lang.code ? 'rgba(198,255,77,0.45)' : 'rgba(139,146,185,0.12)'}`,
+                          color: language === lang.code ? '#C6FF4D' : '#8B92B9',
+                          fontSize: 14, fontWeight: language === lang.code ? 600 : 400,
+                          cursor: 'pointer', transition: 'all 0.2s',
+                        }}>
+                        <span>{lang.flag}</span> {lang.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {LANGUAGES.map(lang => (
-                    <button
-                      key={lang.code}
-                      onClick={() => setLanguage(lang.code)}
-                      className="btn-hover"
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '8px 16px', borderRadius: 50,
-                        background: language === lang.code ? 'rgba(198,255,77,0.15)' : 'rgba(30,35,71,0.5)',
-                        border: `1px solid ${language === lang.code ? 'rgba(198,255,77,0.45)' : 'rgba(139,146,185,0.12)'}`,
-                        color: language === lang.code ? '#C6FF4D' : '#8B92B9',
-                        fontSize: 14, fontWeight: language === lang.code ? 600 : 400,
-                        cursor: 'pointer', transition: 'all 0.2s',
-                      }}>
-                      <span>{lang.flag}</span> {lang.label}
-                    </button>
-                  ))}
+
+                {/* Speed row */}
+                <div style={{ animation: 'floatIn 0.6s 0.2s ease both' }}>
+                  <div style={{ fontSize: 12, color: '#4A5280', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
+                    Reading Speed
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {(['slow', 'normal', 'fast'] as const).map(speed => (
+                      <button
+                        key={speed}
+                        onClick={() => setTtsSpeed(speed)}
+                        className="btn-hover"
+                        style={{
+                          padding: '8px 16px', borderRadius: 50,
+                          background: ttsSpeed === speed ? 'rgba(140,123,255,0.15)' : 'rgba(30,35,71,0.5)',
+                          border: `1px solid ${ttsSpeed === speed ? 'rgba(140,123,255,0.45)' : 'rgba(139,146,185,0.12)'}`,
+                          color: ttsSpeed === speed ? '#8C7BFF' : '#8B92B9',
+                          fontSize: 14, fontWeight: ttsSpeed === speed ? 600 : 400, textTransform: 'capitalize',
+                          cursor: 'pointer', transition: 'all 0.2s',
+                        }}>
+                        {speed}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1152,7 +1197,7 @@ export default function VoiceSprint() {
                   if (langCheck.status === 'warn') {
                     setShowMismatchModal(true)
                   } else {
-                    requestMic(startSprint)
+                    requestPreSprintChecks(startSprint)
                   }
                 }}
                 className="btn-hover"
@@ -1187,6 +1232,34 @@ export default function VoiceSprint() {
         ══════════════════════════════════════════════════ */}
         {screen === 'sprint' && (
           <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}>
+
+            {/* Leave Sprint Button */}
+            <button
+              onClick={() => {
+                if (window.confirm('Are you sure you want to leave the sprint? Your progress will be lost.')) {
+                  stopAll()
+                  setScreen('start')
+                }
+              }}
+              className="btn-hover"
+              style={{
+                position: 'fixed',
+                top: 24, left: 24,
+                background: 'rgba(15,18,40,0.6)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid rgba(139,146,185,0.15)',
+                color: '#8B92B9',
+                padding: '8px 16px',
+                borderRadius: 12,
+                fontSize: 13,
+                fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 6,
+                cursor: 'pointer',
+                zIndex: 20,
+              }}
+            >
+              <span>✕</span> Leave Sprint
+            </button>
 
             {/* Progress bar */}
             <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 4, background: 'rgba(139,146,185,0.1)', zIndex: 10 }}>
@@ -1536,7 +1609,7 @@ export default function VoiceSprint() {
                 {/* Reattempt — same questions */}
                 <button
                   onClick={() => {
-                    requestMic(() => {
+                    requestPreSprintChecks(() => {
                       stopAll()
                       indexRef.current      = 0
                       resultsRef.current    = []
@@ -1678,7 +1751,7 @@ export default function VoiceSprint() {
                 Go back
               </button>
               <button
-                onClick={() => { setShowMismatchModal(false); requestMic(startSprint) }}
+                onClick={() => { setShowMismatchModal(false); requestPreSprintChecks(startSprint) }}
                 className="btn-hover"
                 style={{
                   flex: 1, padding: '13px',
@@ -1691,6 +1764,63 @@ export default function VoiceSprint() {
                 }}
               >
                 <span>🎙️</span> Override & Start
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    {/* ── Silent Mode Warning Modal ────────────────────────────────── */}
+      {showSilentModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 110,
+            background: 'rgba(8,11,26,0.9)',
+            backdropFilter: 'blur(12px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24,
+            animation: 'floatIn 0.2s ease forwards',
+          }}
+        >
+          <div style={{
+            width: '100%', maxWidth: 420,
+            background: '#0F1228',
+            border: '1px solid rgba(255,193,7,0.25)',
+            borderRadius: 28, overflow: 'hidden',
+            animation: 'scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) forwards',
+          }}>
+            <div style={{
+              padding: '32px 28px 24px',
+              borderBottom: '1px solid rgba(139,146,185,0.08)',
+              textAlign: 'center',
+            }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: 20, margin: '0 auto 18px',
+                background: 'rgba(255,193,7,0.12)',
+                border: '1px solid rgba(255,193,7,0.25)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28,
+              }}>🔊</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#F0F4FF', marginBottom: 8 }}>
+                Turn off Silent Mode
+              </div>
+              <div style={{ fontSize: 13, color: '#8B92B9', lineHeight: 1.6 }}>
+                If your device is on Silent Mode (especially on iPhone), you will NOT hear the questions being read out loud. Please ensure your ringer is on.
+              </div>
+            </div>
+            <div style={{ padding: '20px 28px' }}>
+              <button
+                onClick={continueFromSilentToMic}
+                className="btn-hover"
+                style={{
+                  width: '100%', padding: '16px', borderRadius: 16,
+                  background: 'linear-gradient(135deg, #FFD60A 0%, #FF9F0A 100%)',
+                  border: 'none', color: '#080B1A',
+                  fontSize: 15, fontWeight: 800, cursor: 'pointer',
+                  fontFamily: "'Space Grotesk', sans-serif",
+                }}
+              >
+                I am off Silent Mode
               </button>
             </div>
           </div>
@@ -1744,7 +1874,6 @@ export default function VoiceSprint() {
                 { icon: '👁️', text: 'Only you can see your transcripts and results' },
                 { icon: '⏱️', text: 'The mic is active only while a question is recording' },
                 { icon: '🙈', text: 'Nothing is sent anywhere except for live transcription' },
-                { icon: '🔊', text: 'Ensure your device is NOT on Silent Mode, otherwise you won\'t hear the questions.' },
               ].map(pt => (
                 <div key={pt.icon} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 14 }}>
                   <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{pt.icon}</span>

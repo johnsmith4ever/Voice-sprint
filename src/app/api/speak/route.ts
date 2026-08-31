@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
-  const primaryKey  = process.env.DEEPGRAM_API_KEY_PRIMARY
-  const fallbackKey = process.env.DEEPGRAM_API_KEY_FALLBACK
-
-  if (!primaryKey) {
-    return NextResponse.json({ error: 'Deepgram primary key not configured' }, { status: 500 })
-  }
-
   let text = ''
+  let language = 'en'
   try {
     const body = await req.json()
     text = body.text
+    language = body.language || 'en'
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
@@ -20,37 +15,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No text provided' }, { status: 400 })
   }
 
-  // Currently Deepgram Aura TTS is optimized for English, but we'll use a clear voice
-  const model = 'aura-asteria-en'
-  const url = `https://api.deepgram.com/v1/speak?model=${model}`
+  // Proxy Google Translate TTS for highly accurate language-specific accents
+  const tl = language.split('-')[0] // 'fr-FR' -> 'fr'
+  const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${tl}&client=tw-ob`
 
-  async function callTTS(apiKey: string) {
-    return fetch(url, {
-      method: 'POST',
+  try {
+    const res = await fetch(url)
+    
+    if (!res.ok) {
+      console.error('Translate TTS error:', res.status)
+      return NextResponse.json({ error: `TTS failed with ${res.status}` }, { status: 502 })
+    }
+
+    const audioBuffer = await res.arrayBuffer()
+    return new NextResponse(audioBuffer, {
       headers: {
-        'Authorization': `Token ${apiKey}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'audio/mpeg',
       },
-      body: JSON.stringify({ text }),
     })
+  } catch (e) {
+    console.error('Fetch to Translate TTS failed:', e)
+    return NextResponse.json({ error: 'Fetch failed' }, { status: 500 })
   }
-
-  let res = await callTTS(primaryKey)
-
-  if ((res.status === 401 || res.status === 429) && fallbackKey) {
-    res = await callTTS(fallbackKey)
-  }
-
-  if (!res.ok) {
-    const errorText = await res.text().catch(() => '')
-    console.error('Deepgram TTS error:', res.status, errorText)
-    return NextResponse.json({ error: `TTS failed with ${res.status}` }, { status: 502 })
-  }
-
-  const audioBuffer = await res.arrayBuffer()
-  return new NextResponse(audioBuffer, {
-    headers: {
-      'Content-Type': 'audio/mpeg',
-    },
-  })
 }
