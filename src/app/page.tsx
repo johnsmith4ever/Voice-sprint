@@ -186,6 +186,24 @@ export default function VoiceSprint() {
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [sprintError, setSprintError]   = useState<string | null>(null)
   const [qEntering, setQEntering]       = useState(false)
+  const [isAnswerRevealed, setIsAnswerRevealed] = useState(false)
+
+  const playQuestionAudio = useCallback(async (text: string) => {
+    try {
+      const res = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      })
+      if (!res.ok) return
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.play().catch(e => console.error('Audio play error:', e))
+    } catch (e) {
+      console.error('TTS failed:', e)
+    }
+  }, [])
 
   // ── State: results
   const [results, setResults]       = useState<QuestionResult[]>([])
@@ -414,6 +432,12 @@ export default function VoiceSprint() {
   const startForIndex = useCallback((idx: number) => {
     audioChunksRef.current = []
     isSubmittingRef.current = false
+    setIsAnswerRevealed(false)
+
+    const qText = validQsRef.current[idx]
+    if (qText) {
+      playQuestionAudio(qText)
+    }
 
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(stream => {
@@ -478,7 +502,7 @@ export default function VoiceSprint() {
         }
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalizeQuestion, submitAnswer])
+  }, [finalizeQuestion, submitAnswer, playQuestionAudio])
 
   // Keep the ref up-to-date so finalizeQuestion can call it without circular dep
   useEffect(() => { startForIndexRef.current = startForIndex }, [startForIndex])
@@ -1236,45 +1260,51 @@ export default function VoiceSprint() {
                 )}
               </div>
 
-              {/* Karaoke word-follow (Default Answers mode) */}
-              {hasDefaultAnswers && (() => {
-                const expectedWords = (answersRef.current[currentIndex] ?? '').trim().split(/\s+/).filter(Boolean)
-                if (!expectedWords.length) return null
-                const spokenWords = transcript.trim().split(/\s+/).filter(Boolean)
-                const matched = computeMatchedWords(expectedWords, spokenWords)
-                const allDone = matched.every(Boolean)
-                return (
-                  <div style={{
-                    width: '100%',
-                    background: 'rgba(15,18,40,0.6)',
-                    backdropFilter: 'blur(16px)',
-                    border: `1px solid ${allDone ? 'rgba(198,255,77,0.25)' : 'rgba(140,123,255,0.18)'}`,
-                    borderRadius: 20,
-                    padding: '20px 24px',
-                    transition: 'border-color 0.4s',
-                  }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#4A5280', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 14 }}>
-                      {allDone ? '✅ Complete!' : 'Say these words'}
+              {/* Hidden default answer challenge mode */}
+              {hasDefaultAnswers && answersRef.current[currentIndex]?.trim() && (
+                <div style={{
+                  width: '100%',
+                  background: 'rgba(15,18,40,0.6)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(140,123,255,0.18)',
+                  borderRadius: 20,
+                  padding: '20px 24px',
+                  textAlign: 'center'
+                }}>
+                  {!isAnswerRevealed ? (
+                    <button
+                      onClick={() => setIsAnswerRevealed(true)}
+                      className="btn-hover"
+                      style={{
+                        background: 'rgba(140,123,255,0.15)',
+                        border: '1px solid rgba(140,123,255,0.3)',
+                        color: '#8C7BFF',
+                        padding: '10px 20px',
+                        borderRadius: 12,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      👁️ View default answer
+                    </button>
+                  ) : (
+                    <div style={{ animation: 'floatIn 0.3s ease forwards' }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#4A5280', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+                        Expected Answer
+                      </div>
+                      <div style={{
+                        fontSize: 'clamp(16px, 3.5vw, 22px)',
+                        fontWeight: 500,
+                        color: '#1CB0F6',
+                        lineHeight: 1.5,
+                      }}>
+                        {answersRef.current[currentIndex]}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 10px', justifyContent: 'center' }}>
-                      {expectedWords.map((word, wi) => (
-                        <span key={wi} style={{
-                          fontSize: 'clamp(16px, 3.5vw, 22px)',
-                          fontWeight: 700,
-                          fontFamily: "'Space Grotesk', sans-serif",
-                          color: matched[wi] ? '#1CB0F6' : '#2A2E50',
-                          background: matched[wi] ? 'rgba(28,176,246,0.15)' : 'rgba(139,146,185,0.06)',
-                          border: `1px solid ${matched[wi] ? 'rgba(28,176,246,0.3)' : 'rgba(139,146,185,0.1)'}`,
-                          borderRadius: 10,
-                          padding: '4px 12px',
-                          transition: 'color 0.35s, background 0.35s, border-color 0.35s',
-                          letterSpacing: '0.01em',
-                        }}>{word}</span>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })()}
+                  )}
+                </div>
+              )}
 
               {/* Timer + Mic */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>

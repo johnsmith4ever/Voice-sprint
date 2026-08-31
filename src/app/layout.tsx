@@ -7,6 +7,15 @@ export const metadata: Metadata = {
   keywords: 'oral exam, speech practice, language learning, interview prep',
 }
 
+import type { Viewport } from 'next'
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
