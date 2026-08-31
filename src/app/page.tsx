@@ -235,6 +235,15 @@ export default function VoiceSprint() {
     utterance.lang = language
     const rateMap = { slow: 0.75, normal: 1.0, fast: 1.25 }
     utterance.rate = rateMap[ttsSpeed] || 1.0
+
+    // Explicitly set voice to prevent silent failures on some browsers
+    const voices = window.speechSynthesis.getVoices()
+    if (voices.length > 0) {
+      const voice = voices.find(v => v.lang === language) 
+                 || voices.find(v => v.lang.startsWith(language.split('-')[0]))
+      if (voice) utterance.voice = voice
+    }
+
     window.speechSynthesis.speak(utterance)
   }, [language, ttsSpeed])
 
@@ -1735,6 +1744,7 @@ export default function VoiceSprint() {
                 { icon: '👁️', text: 'Only you can see your transcripts and results' },
                 { icon: '⏱️', text: 'The mic is active only while a question is recording' },
                 { icon: '🙈', text: 'Nothing is sent anywhere except for live transcription' },
+                { icon: '🔊', text: 'Ensure your device is NOT on Silent Mode, otherwise you won\'t hear the questions.' },
               ].map(pt => (
                 <div key={pt.icon} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 14 }}>
                   <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{pt.icon}</span>
