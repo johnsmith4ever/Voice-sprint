@@ -208,6 +208,7 @@ export default function VoiceSprint() {
   const [showMismatchModal, setShowMismatchModal] = useState(false)
   const [showMicModal, setShowMicModal] = useState(false)
   const [showSilentModal, setShowSilentModal] = useState(false)
+  const [showLeaveModal, setShowLeaveModal] = useState(false)
   const [micModalError, setMicModalError] = useState<string | null>(null)
   const pendingSprintFnRef = useRef<(() => void) | null>(null)
 
@@ -228,33 +229,41 @@ export default function VoiceSprint() {
   const [sprintError, setSprintError]   = useState<string | null>(null)
   const [qEntering, setQEntering]       = useState(false)
   const [isAnswerRevealed, setIsAnswerRevealed] = useState(false)
+  const [isReplaying, setIsReplaying]   = useState(false)
 
   const audioInstanceRef = useRef<HTMLAudioElement | null>(null)
 
   const playQuestionAudio = useCallback(async (text: string) => {
     try {
-      if (audioInstanceRef.current) {
-        audioInstanceRef.current.pause()
-        audioInstanceRef.current.currentTime = 0
+      if (!audioInstanceRef.current) {
+        audioInstanceRef.current = new Audio()
       }
+      const audio = audioInstanceRef.current
+      audio.pause()
 
       const res = await fetch('/api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, language })
       })
-      if (!res.ok) return
+      if (!res.ok) throw new Error('TTS fetch failed with ' + res.status)
       
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
+      audio.src = URL.createObjectURL(blob)
       const rateMap = { slow: 0.75, normal: 1.0, fast: 1.25 }
       audio.playbackRate = rateMap[ttsSpeed] || 1.0
       
-      audioInstanceRef.current = audio
       audio.play().catch(e => console.error('Audio play error:', e))
     } catch (e) {
-      console.error('TTS failed:', e)
+      console.error('Audio blob fetch failed, falling back to native synthesis:', e)
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel()
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.lang = language
+        const rateMap = { slow: 0.75, normal: 1.0, fast: 1.25 }
+        utterance.rate = rateMap[ttsSpeed] || 1.0
+        window.speechSynthesis.speak(utterance)
+      }
     }
   }, [language, ttsSpeed])
 
@@ -604,6 +613,13 @@ export default function VoiceSprint() {
   }
 
   const continueFromSilentToMic = () => {
+    // Unlock Audio context for iOS Safari by playing a silent blob during user gesture
+    if (!audioInstanceRef.current) {
+      audioInstanceRef.current = new Audio()
+    }
+    audioInstanceRef.current.src = 'data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
+    audioInstanceRef.current.play().catch(() => {})
+
     setShowSilentModal(false)
     setMicModalError(null)
     setShowMicModal(true)
@@ -1236,12 +1252,7 @@ export default function VoiceSprint() {
 
             {/* Leave Sprint Button */}
             <button
-              onClick={() => {
-                if (window.confirm('Are you sure you want to leave the sprint? Your progress will be lost.')) {
-                  stopAll()
-                  setScreen('start')
-                }
-              }}
+              onClick={() => setShowLeaveModal(true)}
               className="btn-hover"
               style={{
                 position: 'fixed',
@@ -1375,6 +1386,32 @@ export default function VoiceSprint() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Replay Button */}
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24, zIndex: 5, position: 'relative' }}>
+                <button
+                  onClick={() => {
+                    setIsReplaying(true)
+                    const qText = validQsRef.current[currentIndex]
+                    if (qText) playQuestionAudio(qText)
+                    setTimeout(() => setIsReplaying(false), 300)
+                  }}
+                  className="btn-hover"
+                  style={{
+                    background: 'rgba(15,18,40,0.6)',
+                    border: '1px solid rgba(140,123,255,0.3)',
+                    borderRadius: '50%',
+                    width: 48, height: 48,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer',
+                    transform: isReplaying ? 'scale(0.85) rotate(-10deg)' : 'scale(1)',
+                    transition: 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)',
+                  }}
+                  title="Replay Audio"
+                >
+                  <span style={{ fontSize: 24 }}>🔊</span>
+                </button>
               </div>
 
               {/* Hidden default answer challenge mode */}
@@ -1822,6 +1859,80 @@ export default function VoiceSprint() {
                 }}
               >
                 I am off Silent Mode
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Leave Sprint Modal ─────────────────────────────────────── */}
+      {showLeaveModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 110,
+            background: 'rgba(8,11,26,0.9)',
+            backdropFilter: 'blur(12px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24,
+            animation: 'floatIn 0.2s ease forwards',
+          }}
+        >
+          <div style={{
+            width: '100%', maxWidth: 420,
+            background: '#0F1228',
+            border: '1px solid rgba(139,146,185,0.15)',
+            borderRadius: 28, overflow: 'hidden',
+            animation: 'scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) forwards',
+          }}>
+            <div style={{
+              padding: '32px 28px 24px',
+              borderBottom: '1px solid rgba(139,146,185,0.08)',
+              textAlign: 'center',
+            }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: 20, margin: '0 auto 18px',
+                background: 'rgba(255,77,109,0.12)',
+                border: '1px solid rgba(255,77,109,0.25)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28,
+              }}>🏃</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#F0F4FF', marginBottom: 8 }}>
+                Leave Sprint?
+              </div>
+              <div style={{ fontSize: 13, color: '#8B92B9', lineHeight: 1.6 }}>
+                Are you sure you want to leave the sprint? All current progress will be lost and you will be returned to the start screen.
+              </div>
+            </div>
+            <div style={{ padding: '20px 28px', display: 'flex', gap: 12 }}>
+              <button
+                onClick={() => setShowLeaveModal(false)}
+                className="btn-hover"
+                style={{
+                  flex: 1, padding: '14px', borderRadius: 16,
+                  background: 'rgba(139,146,185,0.08)',
+                  border: '1px solid rgba(139,146,185,0.15)',
+                  color: '#8B92B9', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                  fontFamily: "'Space Grotesk', sans-serif",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowLeaveModal(false)
+                  stopAll()
+                  setScreen('start')
+                }}
+                className="btn-hover"
+                style={{
+                  flex: 1, padding: '14px', borderRadius: 16,
+                  background: 'linear-gradient(135deg, #FF4D6D 0%, #CC2244 100%)',
+                  border: 'none', color: '#fff',
+                  fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                  fontFamily: "'Space Grotesk', sans-serif",
+                }}
+              >
+                Leave
               </button>
             </div>
           </div>

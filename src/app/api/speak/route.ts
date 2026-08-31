@@ -20,7 +20,11 @@ export async function POST(req: NextRequest) {
   const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${tl}&client=tw-ob`
 
   try {
-    const res = await fetch(url)
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+      }
+    })
     
     if (!res.ok) {
       console.error('Translate TTS error:', res.status)
