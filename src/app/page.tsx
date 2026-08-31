@@ -460,12 +460,13 @@ export default function VoiceSprint() {
         }, 1000)
       })
       .catch(err => {
-        console.error('Mic error:', err)
+        const name    = (err as DOMException)?.name    ?? 'UnknownError'
+        const message = (err as DOMException)?.message ?? String(err)
+        console.error('[Mic] startForIndex getUserMedia failed — name:', name, '| message:', message)
         setIsRecording(false)
         setIsTranscribing(false)
         isSubmittingRef.current = false
         // Give the user a readable error rather than a silent failure
-        const name = (err as DOMException)?.name ?? ''
         if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
           setSprintError('No microphone found. Please plug in a mic or check your system audio settings, then try again.')
         } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
@@ -473,7 +474,7 @@ export default function VoiceSprint() {
         } else if (name === 'NotReadableError' || name === 'TrackStartError') {
           setSprintError('Your microphone is in use by another app. Close any other apps using the mic and try again.')
         } else {
-          setSprintError(`Could not access microphone: ${(err as Error)?.message ?? err}`)
+          setSprintError(`Could not access microphone (${name}): ${message}`)
         }
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1679,15 +1680,43 @@ export default function VoiceSprint() {
 
               {/* Inline error */}
               {micModalError && (
-                <div style={{
-                  padding: '10px 14px', borderRadius: 12,
-                  background: 'rgba(255,77,109,0.08)',
-                  border: '1px solid rgba(255,77,109,0.25)',
-                  color: '#FF4D6D', fontSize: 13, lineHeight: 1.5,
-                  marginBottom: 16, marginTop: 4,
-                }}>
-                  {micModalError}
-                </div>
+                micModalError === '__DENIED__' ? (
+                  <div style={{
+                    padding: '14px 16px', borderRadius: 12,
+                    background: 'rgba(255,77,109,0.08)',
+                    border: '1px solid rgba(255,77,109,0.25)',
+                    marginBottom: 16, marginTop: 4,
+                  }}>
+                    <div style={{ color: '#FF4D6D', fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+                      🚫 Microphone access is blocked
+                    </div>
+                    <div style={{ color: '#8B92B9', fontSize: 12, lineHeight: 1.6 }}>
+                      Your browser has already denied microphone access for this site — this app can't re-trigger the permission prompt in code. You'll need to reset it manually in your browser settings, then refresh this page.
+                    </div>
+                    <a
+                      href="https://support.google.com/chrome/answer/2693767"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        marginTop: 10, fontSize: 12, fontWeight: 600,
+                        color: '#C6FF4D', textDecoration: 'none',
+                      }}
+                    >
+                      How to reset mic permissions in Chrome →
+                    </a>
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: '10px 14px', borderRadius: 12,
+                    background: 'rgba(255,77,109,0.08)',
+                    border: '1px solid rgba(255,77,109,0.25)',
+                    color: '#FF4D6D', fontSize: 13, lineHeight: 1.5,
+                    marginBottom: 16, marginTop: 4,
+                  }}>
+                    {micModalError}
+                  </div>
+                )
               )}
             </div>
 
@@ -1709,22 +1738,48 @@ export default function VoiceSprint() {
               <button
                 onClick={async () => {
                   setMicModalError(null)
+
+                  // ── 1. Check current permission state before requesting ──────
                   try {
-                    // Pre-request permission — browser shows the native popup here
+                    const permStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName })
+                    console.log('[Mic] navigator.permissions state:', permStatus.state)
+
+                    if (permStatus.state === 'denied') {
+                      // Browser already has a hard block — getUserMedia won't even
+                      // show the native prompt. Tell the user to reset it manually.
+                      console.warn('[Mic] Permission is hard-denied; skipping getUserMedia call.')
+                      setMicModalError('__DENIED__')
+                      return
+                    }
+                  } catch (permErr) {
+                    // permissions.query not supported in this browser — carry on
+                    console.warn('[Mic] permissions.query not available:', permErr)
+                  }
+
+                  // ── 2. getUserMedia — must be the FIRST async action after the
+                  //       click so Chrome/Edge counts it as user-activated. ───────
+                  console.log('[Mic] Calling getUserMedia({ audio: true }) …')
+                  try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                    console.log('[Mic] Access granted, stream id:', stream.id)
                     // Release immediately — startForIndex will open its own stream
                     stream.getTracks().forEach(t => t.stop())
                     setShowMicModal(false)
                     pendingSprintFnRef.current?.()
                     pendingSprintFnRef.current = null
                   } catch (err) {
-                    const name = (err as DOMException)?.name ?? ''
+                    const name    = (err as DOMException)?.name    ?? 'UnknownError'
+                    const message = (err as DOMException)?.message ?? String(err)
+                    console.error('[Mic] getUserMedia failed — name:', name, '| message:', message)
+
                     if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
                       setMicModalError('No microphone found. Please connect a mic and try again.')
                     } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-                      setMicModalError('Permission denied. Allow microphone access in your browser settings.')
+                      setMicModalError('__DENIED__')
+                    } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+                      setMicModalError('Microphone is in use by another app. Close it and try again.')
                     } else {
-                      setMicModalError(`Could not access microphone: ${(err as Error)?.message ?? err}`)
+                      setMicModalError(`Could not access microphone (${name}): ${message}`)
                     }
                   }
                 }}
