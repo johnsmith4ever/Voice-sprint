@@ -156,6 +156,46 @@ export default function VoiceSprint() {
   const [showQuestion, setShowQuestion] = useState(true)
   const [hasDefaultAnswers, setHasDefaultAnswers] = useState(false)
   const [answers, setAnswers] = useState<string[]>([''])
+  const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>('fast')
+
+  // ── LocalStorage persistence
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('voiceSprintState')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.questions) setQuestions(parsed.questions)
+        if (parsed.language) setLanguage(parsed.language)
+        if (parsed.notesInput) setNotesInput(parsed.notesInput)
+        if (parsed.draftText !== undefined) setDraftText(parsed.draftText)
+        if (parsed.draftAnswers) setDraftAnswers(parsed.draftAnswers)
+        if (parsed.showQuestion !== undefined) setShowQuestion(parsed.showQuestion)
+        if (parsed.hasDefaultAnswers !== undefined) setHasDefaultAnswers(parsed.hasDefaultAnswers)
+        if (parsed.answers) setAnswers(parsed.answers)
+        if (parsed.ttsSpeed) setTtsSpeed(parsed.ttsSpeed)
+      }
+    } catch (e) {
+      console.error('Failed to load state from localStorage', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('voiceSprintState', JSON.stringify({
+        questions,
+        language,
+        notesInput,
+        draftText,
+        draftAnswers,
+        showQuestion,
+        hasDefaultAnswers,
+        answers,
+        ttsSpeed
+      }))
+    } catch (e) {
+      console.error('Failed to save state to localStorage', e)
+    }
+  }, [questions, language, notesInput, draftText, draftAnswers, showQuestion, hasDefaultAnswers, answers, ttsSpeed])
 
   // ── State: language check
   type LangCheckStatus = 'idle' | 'checking' | 'ok' | 'warn'
@@ -188,22 +228,15 @@ export default function VoiceSprint() {
   const [qEntering, setQEntering]       = useState(false)
   const [isAnswerRevealed, setIsAnswerRevealed] = useState(false)
 
-  const playQuestionAudio = useCallback(async (text: string) => {
-    try {
-      const res = await fetch('/api/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      })
-      if (!res.ok) return
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      audio.play().catch(e => console.error('Audio play error:', e))
-    } catch (e) {
-      console.error('TTS failed:', e)
-    }
-  }, [])
+  const playQuestionAudio = useCallback((text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return
+    window.speechSynthesis.cancel() // Stop any ongoing speech
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = language
+    const rateMap = { slow: 0.75, normal: 1.0, fast: 1.25 }
+    utterance.rate = rateMap[ttsSpeed] || 1.0
+    window.speechSynthesis.speak(utterance)
+  }, [language, ttsSpeed])
 
   // ── State: results
   const [results, setResults]       = useState<QuestionResult[]>([])
@@ -363,6 +396,7 @@ export default function VoiceSprint() {
     }
     mediaRecorderRef.current = null
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
+    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel()
     audioChunksRef.current = []
     setIsRecording(false)
     setIsTranscribing(false)
