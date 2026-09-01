@@ -425,9 +425,11 @@ export default function VoiceSprint() {
     }
     mediaRecorderRef.current = null
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
-    if (audioInstanceRef.current) {
-      audioInstanceRef.current.pause()
-      audioInstanceRef.current.currentTime = 0
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop()
+        audioSourceRef.current.disconnect()
+      } catch (e) {}
     }
     audioChunksRef.current = []
     setIsRecording(false)
