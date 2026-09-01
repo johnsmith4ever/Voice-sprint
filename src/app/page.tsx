@@ -522,8 +522,6 @@ export default function VoiceSprint() {
 
     const qText = validQsRef.current[idx]
 
-    const qText = validQsRef.current[idx]
-
     const startRecording = (stream: MediaStream) => {
       streamRef.current = stream
       if (qText) {
