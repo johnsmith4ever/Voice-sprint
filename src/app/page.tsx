@@ -259,7 +259,9 @@ export default function VoiceSprint() {
       if (!res.ok) throw new Error('TTS fetch failed with ' + res.status)
       
       const arrayBuffer = await res.arrayBuffer()
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+      const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+        ctx.decodeAudioData(arrayBuffer, resolve, reject)
+      })
       
       const source = ctx.createBufferSource()
       source.buffer = audioBuffer
@@ -520,71 +522,76 @@ export default function VoiceSprint() {
 
     const qText = validQsRef.current[idx]
 
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        streamRef.current = stream
-        if (qText) {
-          playQuestionAudio(qText)
+    const qText = validQsRef.current[idx]
+
+    const startRecording = (stream: MediaStream) => {
+      streamRef.current = stream
+      if (qText) {
+        playQuestionAudio(qText)
+      }
+      const mimeType = getSupportedMimeType()
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (e: BlobEvent) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        // DO NOT release mic stream here. Keep it alive for the entire sprint.
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+        let transcriptText = ''
+        try {
+          const fd = new FormData()
+          fd.append('audio', blob, 'recording.webm')
+          fd.append('language', languageRef.current)
+          const res  = await fetch('/api/transcribe', { method: 'POST', body: fd })
+          const data = await res.json()
+          transcriptText = data.transcript ?? ''
+        } catch (err) {
+          console.error('Transcription failed:', err)
         }
-        const mimeType = getSupportedMimeType()
-        const recorder = mimeType
-          ? new MediaRecorder(stream, { mimeType })
-          : new MediaRecorder(stream)
-        mediaRecorderRef.current = recorder
+        finalizeQuestion(transcriptText)
+      }
 
-        recorder.ondataavailable = (e: BlobEvent) => {
-          if (e.data.size > 0) audioChunksRef.current.push(e.data)
-        }
+      recorder.start()
+      setIsRecording(true)
 
-        recorder.onstop = async () => {
-          // Release mic stream
-          stream.getTracks().forEach(t => t.stop())
-          streamRef.current = null
+      // Start countdown timer
+      let t = QUESTION_TIME
+      setTimeLeft(t)
+      timerRef.current = setInterval(() => {
+        t--; setTimeLeft(t)
+        if (t <= 0) submitAnswer()
+      }, 1000)
+    }
 
-          const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
-          let transcriptText = ''
-          try {
-            const fd = new FormData()
-            fd.append('audio', blob, 'recording.webm')
-            fd.append('language', languageRef.current)
-            const res  = await fetch('/api/transcribe', { method: 'POST', body: fd })
-            const data = await res.json()
-            transcriptText = data.transcript ?? ''
-          } catch (err) {
-            console.error('Transcription failed:', err)
+    if (streamRef.current && streamRef.current.active) {
+      startRecording(streamRef.current)
+    } else {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(startRecording)
+        .catch(err => {
+          const name    = (err as DOMException)?.name    ?? 'UnknownError'
+          const message = (err as DOMException)?.message ?? String(err)
+          console.error('[Mic] startForIndex getUserMedia failed — name:', name, '| message:', message)
+          setIsRecording(false)
+          setIsTranscribing(false)
+          isSubmittingRef.current = false
+          // Give the user a readable error rather than a silent failure
+          if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+            setSprintError('No microphone found. Please plug in a mic or check your system audio settings, then try again.')
+          } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+            setSprintError('Microphone access was denied. Allow mic access in your browser settings and try again.')
+          } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+            setSprintError('Your microphone is in use by another app. Close any other apps using the mic and try again.')
+          } else {
+            setSprintError(`Could not access microphone (${name}): ${message}`)
           }
-          finalizeQuestion(transcriptText)
-        }
-
-        recorder.start()
-        setIsRecording(true)
-
-        // Start countdown timer
-        let t = QUESTION_TIME
-        setTimeLeft(t)
-        timerRef.current = setInterval(() => {
-          t--; setTimeLeft(t)
-          if (t <= 0) submitAnswer()
-        }, 1000)
-      })
-      .catch(err => {
-        const name    = (err as DOMException)?.name    ?? 'UnknownError'
-        const message = (err as DOMException)?.message ?? String(err)
-        console.error('[Mic] startForIndex getUserMedia failed — name:', name, '| message:', message)
-        setIsRecording(false)
-        setIsTranscribing(false)
-        isSubmittingRef.current = false
-        // Give the user a readable error rather than a silent failure
-        if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-          setSprintError('No microphone found. Please plug in a mic or check your system audio settings, then try again.')
-        } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          setSprintError('Microphone access was denied. Allow mic access in your browser settings and try again.')
-        } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-          setSprintError('Your microphone is in use by another app. Close any other apps using the mic and try again.')
-        } else {
-          setSprintError(`Could not access microphone (${name}): ${message}`)
-        }
-      })
+        })
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finalizeQuestion, submitAnswer, playQuestionAudio])
 
@@ -2099,8 +2106,8 @@ export default function VoiceSprint() {
                   try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
                     console.log('[Mic] Access granted, stream id:', stream.id)
-                    // Release immediately — startForIndex will open its own stream
-                    stream.getTracks().forEach(t => t.stop())
+                    // Keep the stream alive and pass it down for the entire sprint
+                    streamRef.current = stream
                     setShowMicModal(false)
                     pendingSprintFnRef.current?.()
                     pendingSprintFnRef.current = null
