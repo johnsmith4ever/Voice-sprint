@@ -705,7 +705,7 @@ export default function VoiceSprint() {
                   background: 'rgba(140,123,255,0.12)', border: '1px solid rgba(140,123,255,0.25)',
                   borderRadius: 40, padding: '6px 18px', marginBottom: 24,
                 }}>
-                  <span style={{ fontSize: 18 }}>🎤</span>
+                  <img src="/logo.png" alt="Voice Sprint Logo" style={{ width: 22, height: 22, objectFit: 'contain' }} />
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#8C7BFF', letterSpacing: '0.04em' }}>VOICE SPRINT</span>
                 </div>
                 <h1 className="font-display" style={{
