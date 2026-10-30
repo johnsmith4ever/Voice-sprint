@@ -5,6 +5,11 @@ export const metadata: Metadata = {
   title: 'Voice Sprint — Oral Exam Practice',
   description: 'Practice your oral exams with AI-powered question sets and speech recognition. Record your answers, get instant transcripts.',
   keywords: 'oral exam, speech practice, language learning, interview prep',
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+    apple: '/apple-icon.png',
+  },
 }
 
 import type { Viewport } from 'next'
